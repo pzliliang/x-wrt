@@ -31,25 +31,28 @@ jobs:
 
       - name: Configure target & feeds
         run: |
+          # 先初始化 .config 文件
+          touch .config
+
           # ========== 设置HY3000设备目标 ==========
-          ./scripts/config --set-val CONFIG_TARGET_mediatek y
-          ./scripts/config --set-val CONFIG_TARGET_mediatek_filogic y
-          ./scripts/config --set-val CONFIG_TARGET_mediatek_filogic_DEVICE_philips_hy3000 y
+          echo 'CONFIG_TARGET_mediatek=y' >> .config
+          echo 'CONFIG_TARGET_mediatek_filogic=y' >> .config
+          echo 'CONFIG_TARGET_mediatek_filogic_DEVICE_philips_hy3000=y' >> .config
 
           # ========== 更新并安装feeds软件源 ==========
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
           # ========== EMMC存储驱动支持 ==========
-          ./scripts/config --set-val CONFIG_PACKAGE_kmod-mmc y
-          ./scripts/config --set-val CONFIG_PACKAGE_kmod-fs-ext4 y
-          ./scripts/config --set-val CONFIG_PACKAGE_kmod-fs-f2fs y
-          ./scripts/config --set-val CONFIG_PACKAGE_block-mount y
+          echo 'CONFIG_PACKAGE_kmod-mmc=y' >> .config
+          echo 'CONFIG_PACKAGE_kmod-fs-ext4=y' >> .config
+          echo 'CONFIG_PACKAGE_kmod-fs-f2fs=y' >> .config
+          echo 'CONFIG_PACKAGE_block-mount=y' >> .config
 
           # ========== LuCI插件与中文界面 ==========
-          ./scripts/config --set-val CONFIG_PACKAGE_luci-app-statistics y
-          ./scripts/config --set-val CONFIG_PACKAGE_luci-app-nlbwmon y
-          ./scripts/config --set-val CONFIG_PACKAGE_luci-i18n-base-zh-cn y
+          echo 'CONFIG_PACKAGE_luci-app-statistics=y' >> .config
+          echo 'CONFIG_PACKAGE_luci-app-nlbwmon=y' >> .config
+          echo 'CONFIG_PACKAGE_luci-i18n-base-zh-cn=y' >> .config
 
           make defconfig
 
@@ -60,7 +63,7 @@ jobs:
 
       - name: Start compile firmware
         run: |
-          # 如果经常莫名崩溃就改成 make -j1 V=s
+          # 崩溃就改成 make -j1 V=s
           make -j2 V=s
 
       - name: List generated firmware files
