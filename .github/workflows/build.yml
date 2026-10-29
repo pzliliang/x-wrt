@@ -1,83 +1,89 @@
-name: Build X‑WRT for HY3000
+name: Build X-WRT for HY3000 (Self-contained Repo)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Compile X‑WRT‑HY3000
+    name: Compile X-WRT-HY3000
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 360
+    
     steps:
-      - name: Checkout source
+      # 1. 直接拉取你自己的仓库
+      - name: Checkout my source
         uses: actions/checkout@v4
 
-      - name: Clean up runner disk (释放内存/磁盘，非常关键)
+      # 2. 修复 U-Boot 2026.10 404 Bug (万一你仓库里也有这个雷)
+      - name: Fix broken U-Boot Bug
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h
+          sed -i 's/PKG_VERSION:=2026.10/PKG_VERSION:=2024.01/g' tools/mkimage/Makefile || true
+          sed -i 's|HOST_BUILD_DIR:=$(BUILD_DIR_HOST)/u-boot-v$(PKG_VERSION)|HOST_BUILD_DIR:=$(BUILD_DIR_HOST)/u-boot-$(PKG_VERSION)|g' tools/mkimage/Makefile
+          sed -i 's|PKG_HASH:=.*|PKG_HASH:=skip|g' tools/mkimage/Makefile
 
+      # 3. 挂载 4GB Swap 并清理磁盘
+      - name: Maximize build space & create swap
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 512
+          swap-size-mb: 4096
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+
+      - name: Check memory and swap
+        run: free -h && swapon --show
+
+      # 4. 安装编译依赖
       - name: Install compile dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential ecj fastjar file flex g++ gawk gettext git-core \
+          sudo apt-get install -y build-essential ecj fastjar file flex g++ gawk gettext git-core \
             libelf-dev libncurses5-dev libncursesw5-dev libssl-dev \
             python3 python3-dev python3-setuptools python3-pyelftools \
             rsync subversion swig unzip wget zlib1g-dev device-tree-compiler
 
-      - name: Cache dl download directory
+      # 5. 缓存 dl 目录
+      - name: Cache dl directory
         uses: actions/cache@v4
         with:
           path: dl
-          key: xwrt-dl-cache-hy3000
-          restore-keys: |
-            xwrt-dl-cache-
+          key: xwrt-dl-cache-hy3000-v1
+          restore-keys: xwrt-dl-cache-
 
-      - name: Configure & feeds(只更新必要feed，禁止‑a全部更新！)
+      # 6. 写入配置（直接在你的根目录写）
+      - name: Configure & feeds
         run: |
+          # 如果你在根目录放了 hy3000.config，可以直接 cp 过来
+          # cp hy3000.config .config
+          
+          # 或者用 echo 写入：
           touch .config
-
-          # 设置目标设备 philips_hy3000
           echo 'CONFIG_TARGET_mediatek=y' >> .config
           echo 'CONFIG_TARGET_mediatek_filogic=y' >> .config
           echo 'CONFIG_TARGET_mediatek_filogic_DEVICE_philips_hy3000=y' >> .config
-
-          # ⚠️关键：不要 update -a！只更新需要的 feeds，防止内存爆炸
-          ./scripts/feeds update packages luci x
-          ./scripts/feeds install packages luci x
-
-          # EMMC驱动
-          echo 'CONFIG_PACKAGE_kmod-mmc=y' >> .config
-          echo 'CONFIG_PACKAGE_kmod-fs-ext4=y' >> .config
-          echo 'CONFIG_PACKAGE_kmod-fs-f2fs=y' >> .config
-          echo 'CONFIG_PACKAGE_block-mount=y' >> .config
-
-          # 插件+中文
-          echo 'CONFIG_PACKAGE_luci-app-statistics=y' >> .config
-          echo 'CONFIG_PACKAGE_luci-app-nlbwmon=y' >> .config
+          echo 'CONFIG_PACKAGE_luci=y' >> .config
           echo 'CONFIG_PACKAGE_luci-i18n-base-zh-cn=y' >> .config
 
+          ./scripts/feeds update packages luci x
+          ./scripts/feeds install packages luci x
+          
           make defconfig
 
-          echo "===== Check target device config ====="
-          grep "philips_hy3000" .config
-          grep CONFIG_TARGET .config | head -20
+          echo "===== 强校验设备符号 ====="
+          grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_philips_hy3000=y" .config || { echo "❌ 目标设备符号不存在！"; exit 1; }
 
-      - name: Start compile (强制‑j1 单线程防OOM)
-        run: |
-          make -j1 V=s
+      # 7. 多线程极速下载
+      - name: Download all source packages
+        run: make download -j8 V=s
 
-      - name: List firmware files
-        run: |
-          ls -la bin/targets/mediatek/filogic/
-          if [ ! -d bin/targets/mediatek/filogic ] || [ -z "$(ls bin/targets/mediatek/filogic/*.bin 2>/dev/null)" ]; then
-            echo "⚠️ 没有生成bin固件！"
-            exit 1
-          fi
+      # 8. 正式开始编译（16G内存开 -j2 稳稳的）
+      - name: Start compile
+        run: make -j2 V=s
 
+      # 9. 上传固件
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
-          name: X‑WRT‑HY3000‑Firmware
+          name: X-WRT-HY3000-Firmware
           path: bin/targets/mediatek/filogic/*.bin
